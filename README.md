@@ -7,7 +7,8 @@
 - **Модель:** U-Net ResNet34 — `outputs/train/unet_mix_hrc_sparcs_38_4060/best.pt`
 - **Val IoU ≈ 0.881** (HRC holdout). На Photos — domain gap (under-seg).
 - **Отчёт:** [`docs/FINAL_CASE_REPORT.md`](docs/FINAL_CASE_REPORT.md)
-- **Преза (контент):** [`outputs/presentation/PRESENTATION.md`](outputs/presentation/PRESENTATION.md)
+- **Преза (кейс / case deck):** [`Presentation.pptx`](Presentation.pptx) — презентация кейса cloud detection (СПУТНИКС)
+- **Преза (контент / markdown):** [`outputs/presentation/PRESENTATION.md`](outputs/presentation/PRESENTATION.md)
 
 ## Быстрый старт (локально)
 
