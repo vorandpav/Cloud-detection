@@ -1,0 +1,241 @@
+{
+  "part": "B",
+  "best_ckpt": "E:\\Cloudness detection\\outputs\\train\\unet_photos_pseudo_ft\\best.pt",
+  "best_val_iou": 0.8569206253282562,
+  "config": {
+    "model": "unet",
+    "init_checkpoint": "E:\\Cloudness detection\\outputs\\train\\unet_mix_hrc_sparcs_38_4060\\best.pt",
+    "datasets": [
+      "hrc",
+      "sparcs",
+      "cloud38",
+      "photos_pseudo"
+    ],
+    "weights": {
+      "hrc": 3.0,
+      "sparcs": 2.5,
+      "cloud38": 0.5,
+      "photos_pseudo": 2.5
+    },
+    "epochs": 4,
+    "batch_size": 2,
+    "lr": 0.0001,
+    "image_size": 384,
+    "epoch_size": 640,
+    "seed": 42,
+    "num_workers": 0,
+    "pseudo": "soft_probs",
+    "pseudo_bin_thr_for_viz": 0.35,
+    "held_out_excluded": [
+      "01_2025-10-06_13-11-44_SXC3-2325_1.jpg",
+      "02_2025-10-24_21-36-35_SXC3-2331_1.jpg",
+      "03_2025-11-03_13-31-48_SXC3-2342_1.jpg",
+      "04_2025-11-28_17-30-29_SXC3-2341_1.jpg",
+      "05_2025-12-27_14-10-10_SXC3-2325_1.jpg",
+      "06_2025-12-28_08-32-19_SXC3-2360_1.jpg",
+      "08_2026-01-04_13-45-50_SXC3-2313_1.jpg",
+      "11_2026-02-09_21-42-09_SXC3-2342_1.jpg"
+    ],
+    "device": "cuda"
+  },
+  "pseudo_doc_thr": 0.35,
+  "proxy_sweep": [
+    {
+      "threshold": 0.2,
+      "mean_pred_cloud_pct": 64.66896590437247,
+      "mae_vs_proxy": 49.798028404372474,
+      "pearson_vs_proxy": 0.1528170522470226
+    },
+    {
+      "threshold": 0.25,
+      "mean_pred_cloud_pct": 63.11844727126661,
+      "mae_vs_proxy": 48.24750977126661,
+      "pearson_vs_proxy": 0.16766603011608336
+    },
+    {
+      "threshold": 0.3,
+      "mean_pred_cloud_pct": 61.46685921477831,
+      "mae_vs_proxy": 46.59592171477831,
+      "pearson_vs_proxy": 0.1864743051573095
+    },
+    {
+      "threshold": 0.35,
+      "mean_pred_cloud_pct": 59.20606202159156,
+      "mae_vs_proxy": 44.34248835571924,
+      "pearson_vs_proxy": 0.22210157383831114
+    },
+    {
+      "threshold": 0.4,
+      "mean_pred_cloud_pct": 57.00527744304232,
+      "mae_vs_proxy": 42.17806394650852,
+      "pearson_vs_proxy": 0.25642110370261095
+    },
+    {
+      "threshold": 0.45,
+      "mean_pred_cloud_pct": 55.13700224084705,
+      "mae_vs_proxy": 40.341833082845895,
+      "pearson_vs_proxy": 0.2840781976082088
+    },
+    {
+      "threshold": 0.5,
+      "mean_pred_cloud_pct": 53.44503436868139,
+      "mae_vs_proxy": 38.67879256029751,
+      "pearson_vs_proxy": 0.30700522764109334
+    }
+  ],
+  "chosen_threshold": 0.5,
+  "thr_rule": "После FT: proxy-sweep на 32; оставили 0.5, т.к. MAE_proxy@0.5 =38.68 близко к best 0.50/38.68 (Δ≤0.25).",
+  "gpu_note": "ожидание VRAM 0s; notes=['Свободно 5393 MiB после 0s']",
+  "gpu_wait": {
+    "waited_sec": 0.04053521156311035,
+    "notes": [
+      "Свободно 5393 MiB после 0s"
+    ],
+    "used_mib": 2795,
+    "total_mib": 8188,
+    "free_mib": 5393,
+    "skipped": false
+  },
+  "history": [
+    {
+      "epoch": 1.0,
+      "train_loss": 0.5904748392291367,
+      "val_loss": 0.2943238541483879,
+      "val_dice": 0.9035080252184375,
+      "val_iou": 0.8291573772880532,
+      "val_mae_pct": 5.882206153869629,
+      "val_reject75_acc": 1.0,
+      "lr": 0.0001,
+      "epoch_sec": 60.82750082015991
+    },
+    {
+      "epoch": 2.0,
+      "train_loss": 0.5373549883719534,
+      "val_loss": 0.2593860745429993,
+      "val_dice": 0.921114644105021,
+      "val_iou": 0.8569206253282562,
+      "val_mae_pct": 4.163501644134522,
+      "val_reject75_acc": 0.9666666666666667,
+      "lr": 0.0001,
+      "epoch_sec": 58.113853454589844
+    },
+    {
+      "epoch": 3.0,
+      "train_loss": 0.5183568220119923,
+      "val_loss": 0.2830289214849472,
+      "val_dice": 0.9103201231864031,
+      "val_iou": 0.8408004471297262,
+      "val_mae_pct": 5.290639972686767,
+      "val_reject75_acc": 1.0,
+      "lr": 0.0001,
+      "epoch_sec": 60.60726714134216
+    },
+    {
+      "epoch": 4.0,
+      "train_loss": 0.5057044319342822,
+      "val_loss": 0.4245087633530299,
+      "val_dice": 0.8584238878595846,
+      "val_iou": 0.7633199468328112,
+      "val_mae_pct": 10.860075346628825,
+      "val_reject75_acc": 0.9,
+      "lr": 0.0001,
+      "epoch_sec": 54.578564405441284
+    }
+  ],
+  "heldout_eval": {
+    "threshold": 0.5,
+    "per_image": [
+      {
+        "name": "01_2025-10-06_13-11-44_SXC3-2325_1.jpg",
+        "stem": "01_2025-10-06_13-11-44_SXC3-2325_1",
+        "iou": 0.37827124445141785,
+        "dice": 0.5489068221839128,
+        "cloud_frac_pred_pct": 12.85677534662045,
+        "cloud_frac_gt_pct": 26.767403235124203,
+        "mae_pct": 13.910627888503752,
+        "reject75_agree": 1.0
+      },
+      {
+        "name": "02_2025-10-24_21-36-35_SXC3-2331_1.jpg",
+        "stem": "02_2025-10-24_21-36-35_SXC3-2331_1",
+        "iou": 0.8363599518415136,
+        "dice": 0.9108889038913097,
+        "cloud_frac_pred_pct": 79.86216421143848,
+        "cloud_frac_gt_pct": 93.95625722125939,
+        "mae_pct": 14.09409300982091,
+        "reject75_agree": 1.0
+      },
+      {
+        "name": "03_2025-11-03_13-31-48_SXC3-2342_1.jpg",
+        "stem": "03_2025-11-03_13-31-48_SXC3-2342_1",
+        "iou": 0.42186521417868456,
+        "dice": 0.5933969126889967,
+        "cloud_frac_pred_pct": 10.219436019641826,
+        "cloud_frac_gt_pct": 23.59388539861352,
+        "mae_pct": 13.374449378971693,
+        "reject75_agree": 1.0
+      },
+      {
+        "name": "04_2025-11-28_17-30-29_SXC3-2341_1.jpg",
+        "stem": "04_2025-11-28_17-30-29_SXC3-2341_1",
+        "iou": 0.593772029080757,
+        "dice": 0.7451153844414842,
+        "cloud_frac_pred_pct": 37.117724581166954,
+        "cloud_frac_gt_pct": 62.371822645869436,
+        "mae_pct": 25.254098064702482,
+        "reject75_agree": 1.0
+      },
+      {
+        "name": "05_2025-12-27_14-10-10_SXC3-2325_1.jpg",
+        "stem": "05_2025-12-27_14-10-10_SXC3-2325_1",
+        "iou": 0.6491836394442195,
+        "dice": 0.787278777107854,
+        "cloud_frac_pred_pct": 60.62991948295783,
+        "cloud_frac_gt_pct": 93.38893703061814,
+        "mae_pct": 32.75901754766031,
+        "reject75_agree": 0.0
+      },
+      {
+        "name": "06_2025-12-28_08-32-19_SXC3-2360_1.jpg",
+        "stem": "06_2025-12-28_08-32-19_SXC3-2360_1",
+        "iou": 0.3040844919715891,
+        "dice": 0.4663570402720744,
+        "cloud_frac_pred_pct": 14.11056650779896,
+        "cloud_frac_gt_pct": 46.382149046793764,
+        "mae_pct": 32.27158253899481,
+        "reject75_agree": 1.0
+      },
+      {
+        "name": "08_2026-01-04_13-45-50_SXC3-2313_1.jpg",
+        "stem": "08_2026-01-04_13-45-50_SXC3-2313_1",
+        "iou": 0.469750550957052,
+        "dice": 0.6392248679893414,
+        "cloud_frac_pred_pct": 28.960635109763146,
+        "cloud_frac_gt_pct": 61.63909048238013,
+        "mae_pct": 32.67845537261699,
+        "reject75_agree": 1.0
+      },
+      {
+        "name": "11_2026-02-09_21-42-09_SXC3-2342_1.jpg",
+        "stem": "11_2026-02-09_21-42-09_SXC3-2342_1",
+        "iou": 0.03353525339833338,
+        "dice": 0.06489426129607694,
+        "cloud_frac_pred_pct": 41.32636481802427,
+        "cloud_frac_gt_pct": 14.194062319468514,
+        "mae_pct": 27.132302498555752,
+        "reject75_agree": 1.0
+      }
+    ],
+    "aggregate": {
+      "n": 8.0,
+      "iou": 0.4608527969154459,
+      "dice": 0.5945078712338813,
+      "mae_pct": 23.934328287478337,
+      "reject75_acc": 0.875,
+      "cloud_frac_gt_pct_mean": 52.78670092251589,
+      "cloud_frac_pred_pct_mean": 35.63544825967649
+    },
+    "overlays_dir": "E:\\Cloudness detection\\outputs\\reports\\photos_thr_and_pseudo_ft\\B_pseudo_ft"
+  },
+  "no_leakage_note": "Soft pseudo только на 32 без масок; 8 CVAT не в train и не в выборе thr."
+}

@@ -1,0 +1,213 @@
+{
+  "seed": 42,
+  "baseline_checkpoint": "E:\\Cloudness detection\\outputs\\train\\unet_mix_hrc_sparcs_38_4060\\best.pt",
+  "resolution_note": "Инференс на превью labeling/photos_40/images (типично 768×577), не на полном Photos/. Модель ресайзит к image_size=384, probs возвращаем bilinear на размер превью.",
+  "no_leakage": true,
+  "part_a": {
+    "chosen_threshold": 0.5,
+    "selection_rule": "На unlabeled-32: min MAE(pred%, white_frac_proxy*100); среди MAE ≤ best+0.5 — max Pearson r; при равном r — меньший thr. Photos-8 IoU в выборе НЕ участвует.",
+    "proxy_sweep": [
+      {
+        "threshold": 0.2,
+        "mean_pred_cloud_pct": 58.70949465852469,
+        "mean_proxy_pct": 14.8709375,
+        "mae_vs_proxy": 44.06769967910529,
+        "pearson_vs_proxy": 0.24825634166594826
+      },
+      {
+        "threshold": 0.25,
+        "mean_pred_cloud_pct": 56.942260671667384,
+        "mean_proxy_pct": 14.8709375,
+        "mae_vs_proxy": 42.45797941264081,
+        "pearson_vs_proxy": 0.2677706606018254
+      },
+      {
+        "threshold": 0.3,
+        "mean_pred_cloud_pct": 55.15791145382005,
+        "mean_proxy_pct": 14.8709375,
+        "mae_vs_proxy": 40.81947988879261,
+        "pearson_vs_proxy": 0.2874987345941276
+      },
+      {
+        "threshold": 0.35,
+        "mean_pred_cloud_pct": 53.516711009712594,
+        "mean_proxy_pct": 14.8709375,
+        "mae_vs_proxy": 39.305610557481224,
+        "pearson_vs_proxy": 0.3071466835653492
+      },
+      {
+        "threshold": 0.4,
+        "mean_pred_cloud_pct": 52.00741843361857,
+        "mean_proxy_pct": 14.8709375,
+        "mae_vs_proxy": 37.90979894434214,
+        "pearson_vs_proxy": 0.3246922197365692
+      },
+      {
+        "threshold": 0.45,
+        "mean_pred_cloud_pct": 50.55497917117995,
+        "mean_proxy_pct": 14.8709375,
+        "mae_vs_proxy": 36.562110255090985,
+        "pearson_vs_proxy": 0.34095202678674214
+      },
+      {
+        "threshold": 0.5,
+        "mean_pred_cloud_pct": 49.151847570497544,
+        "mean_proxy_pct": 14.8709375,
+        "mae_vs_proxy": 35.255506582629266,
+        "pearson_vs_proxy": 0.3561239413843079
+      }
+    ],
+    "heldout_aggregate": {
+      "n": 8.0,
+      "iou": 0.49166493797492855,
+      "dice": 0.6214513247811948,
+      "mae_pct": 20.472552444396303,
+      "reject75_acc": 0.875,
+      "cloud_frac_gt_pct_mean": 52.78670092251589,
+      "cloud_frac_pred_pct_mean": 34.97535181073079
+    }
+  },
+  "baseline_0_5_heldout": {
+    "n": 8.0,
+    "iou": 0.49166493797492855,
+    "dice": 0.6214513247811948,
+    "mae_pct": 20.472552444396303,
+    "reject75_acc": 0.875,
+    "cloud_frac_gt_pct_mean": 52.78670092251589,
+    "cloud_frac_pred_pct_mean": 34.97535181073079
+  },
+  "part_b": {
+    "best_ckpt": "E:\\Cloudness detection\\outputs\\train\\unet_photos_pseudo_ft\\best.pt",
+    "config": {
+      "model": "unet",
+      "init_checkpoint": "E:\\Cloudness detection\\outputs\\train\\unet_mix_hrc_sparcs_38_4060\\best.pt",
+      "datasets": [
+        "hrc",
+        "sparcs",
+        "cloud38",
+        "photos_pseudo"
+      ],
+      "weights": {
+        "hrc": 3.0,
+        "sparcs": 2.5,
+        "cloud38": 0.5,
+        "photos_pseudo": 2.5
+      },
+      "epochs": 4,
+      "batch_size": 2,
+      "lr": 0.0001,
+      "image_size": 384,
+      "epoch_size": 640,
+      "seed": 42,
+      "num_workers": 0,
+      "pseudo": "soft_probs",
+      "pseudo_bin_thr_for_viz": 0.35,
+      "held_out_excluded": [
+        "01_2025-10-06_13-11-44_SXC3-2325_1.jpg",
+        "02_2025-10-24_21-36-35_SXC3-2331_1.jpg",
+        "03_2025-11-03_13-31-48_SXC3-2342_1.jpg",
+        "04_2025-11-28_17-30-29_SXC3-2341_1.jpg",
+        "05_2025-12-27_14-10-10_SXC3-2325_1.jpg",
+        "06_2025-12-28_08-32-19_SXC3-2360_1.jpg",
+        "08_2026-01-04_13-45-50_SXC3-2313_1.jpg",
+        "11_2026-02-09_21-42-09_SXC3-2342_1.jpg"
+      ],
+      "device": "cuda"
+    },
+    "chosen_threshold": 0.5,
+    "thr_rule": "После FT: proxy-sweep на 32; оставили 0.5, т.к. MAE_proxy@0.5 =38.68 близко к best 0.50/38.68 (Δ≤0.25).",
+    "proxy_sweep": [
+      {
+        "threshold": 0.2,
+        "mean_pred_cloud_pct": 64.66896590437247,
+        "mae_vs_proxy": 49.798028404372474,
+        "pearson_vs_proxy": 0.1528170522470226
+      },
+      {
+        "threshold": 0.25,
+        "mean_pred_cloud_pct": 63.11844727126661,
+        "mae_vs_proxy": 48.24750977126661,
+        "pearson_vs_proxy": 0.16766603011608336
+      },
+      {
+        "threshold": 0.3,
+        "mean_pred_cloud_pct": 61.46685921477831,
+        "mae_vs_proxy": 46.59592171477831,
+        "pearson_vs_proxy": 0.1864743051573095
+      },
+      {
+        "threshold": 0.35,
+        "mean_pred_cloud_pct": 59.20606202159156,
+        "mae_vs_proxy": 44.34248835571924,
+        "pearson_vs_proxy": 0.22210157383831114
+      },
+      {
+        "threshold": 0.4,
+        "mean_pred_cloud_pct": 57.00527744304232,
+        "mae_vs_proxy": 42.17806394650852,
+        "pearson_vs_proxy": 0.25642110370261095
+      },
+      {
+        "threshold": 0.45,
+        "mean_pred_cloud_pct": 55.13700224084705,
+        "mae_vs_proxy": 40.341833082845895,
+        "pearson_vs_proxy": 0.2840781976082088
+      },
+      {
+        "threshold": 0.5,
+        "mean_pred_cloud_pct": 53.44503436868139,
+        "mae_vs_proxy": 38.67879256029751,
+        "pearson_vs_proxy": 0.30700522764109334
+      }
+    ],
+    "heldout_aggregate": {
+      "n": 8.0,
+      "iou": 0.4608527969154459,
+      "dice": 0.5945078712338813,
+      "mae_pct": 23.934328287478337,
+      "reject75_acc": 0.875,
+      "cloud_frac_gt_pct_mean": 52.78670092251589,
+      "cloud_frac_pred_pct_mean": 35.63544825967649
+    },
+    "gpu_note": "ожидание VRAM 0s; notes=['Свободно 5393 MiB после 0s']"
+  },
+  "comparison_photos8": {
+    "baseline_0.5": {
+      "n": 8.0,
+      "iou": 0.49166493797492855,
+      "dice": 0.6214513247811948,
+      "mae_pct": 20.472552444396303,
+      "reject75_acc": 0.875,
+      "cloud_frac_gt_pct_mean": 52.78670092251589,
+      "cloud_frac_pred_pct_mean": 34.97535181073079
+    },
+    "A": {
+      "n": 8.0,
+      "iou": 0.49166493797492855,
+      "dice": 0.6214513247811948,
+      "mae_pct": 20.472552444396303,
+      "reject75_acc": 0.875,
+      "cloud_frac_gt_pct_mean": 52.78670092251589,
+      "cloud_frac_pred_pct_mean": 34.97535181073079
+    },
+    "B": {
+      "n": 8.0,
+      "iou": 0.4608527969154459,
+      "dice": 0.5945078712338813,
+      "mae_pct": 23.934328287478337,
+      "reject75_acc": 0.875,
+      "cloud_frac_gt_pct_mean": 52.78670092251589,
+      "cloud_frac_pred_pct_mean": 35.63544825967649
+    }
+  },
+  "heldout_files": [
+    "01_2025-10-06_13-11-44_SXC3-2325_1.jpg",
+    "02_2025-10-24_21-36-35_SXC3-2331_1.jpg",
+    "03_2025-11-03_13-31-48_SXC3-2342_1.jpg",
+    "04_2025-11-28_17-30-29_SXC3-2341_1.jpg",
+    "05_2025-12-27_14-10-10_SXC3-2325_1.jpg",
+    "06_2025-12-28_08-32-19_SXC3-2360_1.jpg",
+    "08_2026-01-04_13-45-50_SXC3-2313_1.jpg",
+    "11_2026-02-09_21-42-09_SXC3-2342_1.jpg"
+  ]
+}

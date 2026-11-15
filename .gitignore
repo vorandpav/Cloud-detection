@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.venv/
+.python-version
+
+# Secrets / local env
+.env
+.clearml.conf
+kaggle.json
+
+# Raw and downloaded data (too big for git)
+Photos/
+data/
+*.zip
+*.7z
+
+# Generated artifacts
+outputs/
+labeling/photos_40/images/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
