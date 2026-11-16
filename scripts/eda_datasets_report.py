@@ -1,4 +1,4 @@
-"""Воспроизводимый EDA по доступным датасетам для docs/DATASETS_REPORT.md.
+"""Воспроизводимый EDA по доступным датасетам.
 
 Обходит Photos, 38-Cloud, SPARCS (sending), HRC_WHU, GF1, S2 thumbs;
 сохраняет sample PNG, гистограммы cloud fraction и summary.json в

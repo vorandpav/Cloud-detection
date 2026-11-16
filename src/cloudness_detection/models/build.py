@@ -61,6 +61,6 @@ def build_model(
     if key == "cloud_adapter":
         raise ValueError(
             "Cloud-Adapter не встроен в этот каркас (нужен mmseg + DINOv2). "
-            "Смотри docs/KAGGLE_T4_CLOUD_ADAPTER.md и scripts/kaggle/."
+            "Контекст: docs/CLOUD_DETECTION_RESEARCH.md."
         )
     raise ValueError(f"Неизвестная модель {name!r}. Доступны: {MODEL_NAMES}")

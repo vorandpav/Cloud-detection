@@ -303,7 +303,8 @@ def main() -> None:
     args = parse_args()
     if args.model == "cloud_adapter":
         raise SystemExit(
-            "cloud_adapter → docs/KAGGLE_T4_CLOUD_ADAPTER.md (не локальный SMP-путь)"
+            "cloud_adapter не обучается этим скриптом: нужен mmseg + DINOv2. "
+            "Контекст: docs/CLOUD_DETECTION_RESEARCH.md"
         )
 
     plan = DEVICE_PLANS[args.device_plan]

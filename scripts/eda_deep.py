@@ -1,6 +1,6 @@
 """Глубокий сравнительный EDA: Photos vs публичные сеты.
 
-Артефакты → ``outputs/eda/deep/``, отчёт собирается отдельно в docs/EDA_DEEP.md.
+Артефакты → ``outputs/eda/deep/``.
 Сид фиксирован (DEFAULT_SEED).
 """
 
