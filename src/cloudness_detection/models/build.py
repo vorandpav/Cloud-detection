@@ -1,10 +1,10 @@
-"""Factory: unet | segformer_b2 | cloud_adapter (stub → инструкция T4)."""
+"""Factory: unet | segformer_b2 | cloudnet | cloudnet_plus | cloud_adapter."""
 
 from __future__ import annotations
 
 import torch.nn as nn
 
-MODEL_NAMES = ("unet", "segformer_b2", "cloud_adapter")
+MODEL_NAMES = ("unet", "segformer_b2", "cloudnet", "cloudnet_plus", "cloud_adapter")
 
 
 def list_models() -> tuple[str, ...]:
@@ -21,8 +21,8 @@ def build_model(
     """Собирает модель по короткому имени.
 
     Args:
-        name: ``unet`` | ``segformer_b2`` | ``cloud_adapter``.
-        encoder_weights: Веса энкодера SMP (``imagenet`` / None).
+        name: ``unet`` | ``segformer_b2`` | ``cloudnet`` | ``cloudnet_plus`` | ``cloud_adapter``.
+        encoder_weights: Веса энкодера SMP (``imagenet`` / None). Cloud-Net их не использует.
         in_channels: Число входных каналов (Photos/публичные = 3).
 
     Returns:
@@ -50,6 +50,14 @@ def build_model(
             in_channels=in_channels,
             classes=1,
         )
+    if key in {"cloudnet", "cloud_net"}:
+        from cloudness_detection.models.cloud_net import CloudNet
+
+        return CloudNet(in_channels=in_channels, plus=False)
+    if key in {"cloudnet_plus", "cloud_net_plus", "cloudnet+"}:
+        from cloudness_detection.models.cloud_net import CloudNet
+
+        return CloudNet(in_channels=in_channels, plus=True)
     if key == "cloud_adapter":
         raise ValueError(
             "Cloud-Adapter не встроен в этот каркас (нужен mmseg + DINOv2). "

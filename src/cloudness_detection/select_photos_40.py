@@ -1,10 +1,17 @@
-"""Стратифицированный отбор 40 снимков Photos для ручной разметки."""
+"""Стратифицированный отбор снимков Photos для ручной разметки.
+
+По умолчанию собирает ``labeling/photos_40/``.
+``--n 100`` собирает ``labeling/photos_100/`` тем же сидом:
+первые 40 отобранных кадров совпадают с ``photos_40``, остальные новые.
+"""
 
 from __future__ import annotations
 
+import argparse
 import csv
 import shutil
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
@@ -40,6 +47,75 @@ def white_fraction(jpg_path: Path, threshold: int = 200) -> float:
         Image.fromarray(gray).resize((320, 240), Image.Resampling.BILINEAR)
     )
     return float((small >= threshold).mean())
+
+
+def _white_fraction_stem(jpg_path_str: str) -> tuple[str, float]:
+    """Считает прокси-белизну одного кадра. Нужна для пула потоков.
+
+    Args:
+        jpg_path_str: Путь к JPEG строкой (так проще отдать в executor).
+
+    Returns:
+        Пара (stem, доля ярких пикселей).
+    """
+    path = Path(jpg_path_str)
+    return path.stem, white_fraction(path)
+
+
+def compute_white_fracs(metas: list[PhotoMeta], workers: int) -> dict[str, float]:
+    """Считает прокси-белизну для всех кадров.
+
+    Args:
+        metas: Кадры с валидным KML.
+        workers: Сколько потоков. 1 — последовательно, как раньше.
+
+    Returns:
+        stem -> доля ярких пикселей.
+    """
+    white_fracs: dict[str, float] = {}
+    total = len(metas)
+    if workers <= 1:
+        for i, meta in enumerate(metas, start=1):
+            white_fracs[meta.stem] = white_fraction(meta.jpg_path)
+            if i % 500 == 0:
+                print(f"  {i}/{total}")
+        return white_fracs
+
+    paths = [str(meta.jpg_path) for meta in metas]
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(_white_fraction_stem, path) for path in paths]
+        done = 0
+        for fut in as_completed(futures):
+            stem, frac = fut.result()
+            white_fracs[stem] = frac
+            done += 1
+            if done % 500 == 0:
+                print(f"  {done}/{total}")
+    return white_fracs
+
+
+def load_photos_40_stems(root: Path) -> tuple[set[str], set[str]]:
+    """Читает, какие кадры уже лежат в photos_40 и у каких есть маска.
+
+    Args:
+        root: Корень проекта.
+
+    Returns:
+        (stems из manifest.csv, stems, для которых есть PNG в masks/).
+    """
+    manifest = root / "labeling" / "photos_40" / "manifest.csv"
+    stems: set[str] = set()
+    if manifest.exists():
+        with manifest.open(newline="", encoding="utf-8") as handle:
+            stems = {row["stem"] for row in csv.DictReader(handle)}
+
+    masked: set[str] = set()
+    mask_dir = root / "labeling" / "photos_40" / "masks"
+    if mask_dir.is_dir():
+        for path in mask_dir.glob("*.png"):
+            # Имена вида 01_<stem>.png
+            masked.add(path.stem.split("_", 1)[1])
+    return stems, masked
 
 
 def white_bin(frac: float) -> str:
@@ -142,95 +218,64 @@ def write_thumbnail(src: Path, dst: Path) -> None:
         img.save(dst, quality=90)
 
 
-def main() -> None:
-    """Собирает ``labeling/photos_40/``: превью, манифест, шаблон меток."""
-    set_global_seed(DEFAULT_SEED)
-    rng = np.random.default_rng(DEFAULT_SEED)
+def parse_args() -> argparse.Namespace:
+    """Разбирает размер выборки и папку выхода.
 
-    if not PHOTOS_DIR.is_dir():
-        raise FileNotFoundError(f"Нет папки Photos: {PHOTOS_DIR}")
+    Returns:
+        Аргументы командной строки. Без флагов это прежний набор на 40.
+    """
+    parser = argparse.ArgumentParser(
+        description="Стратифицированный отбор кадров Photos для ручной разметки."
+    )
+    parser.add_argument(
+        "--n",
+        type=int,
+        default=N_SELECT,
+        help="Сколько кадров отобрать (40 → labeling/photos_40, 100 → labeling/photos_100).",
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="Папка набора. По умолчанию labeling/photos_<n>.",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=8,
+        help="Потоки для прокси-белизны. На результат выборки не влияет.",
+    )
+    args = parser.parse_args()
+    if args.n < 1:
+        parser.error("--n должен быть >= 1")
+    if args.workers < 1:
+        parser.error("--workers должен быть >= 1")
+    return args
 
-    print("Читаю KML…")
-    metas = iter_photo_meta(PHOTOS_DIR)
-    print(f"Кадров с KML: {len(metas)}")
 
-    print("Считаю прокси-белизну (это не метки)…")
-    white_fracs: dict[str, float] = {}
-    for i, meta in enumerate(metas, start=1):
-        white_fracs[meta.stem] = white_fraction(meta.jpg_path)
-        if i % 500 == 0:
-            print(f"  {i}/{len(metas)}")
+def readme_text(n: int, n_old: int, n_masked: int) -> str:
+    """Текст README для папки разметки.
 
-    selected = stratified_sample(metas, white_fracs, N_SELECT, rng)
-    selected = sorted(selected, key=lambda m: m.stem)
+    Args:
+        n: Размер нового набора.
+        n_old: Сколько кадров уже были в photos_40.
+        n_masked: Сколько из них уже имеют маску CVAT.
 
-    images_dir = OUT_DIR / "images"
-    if images_dir.exists():
-        shutil.rmtree(images_dir)
-    images_dir.mkdir(parents=True, exist_ok=True)
+    Returns:
+        Markdown.
+    """
+    script = "select-photos-40" if n == N_SELECT else f"select-photos-40 --n {n}"
+    overlap = ""
+    if n != N_SELECT:
+        overlap = f"""
+## Связь с photos_40
 
-    manifest_path = OUT_DIR / "manifest.csv"
-    labels_path = OUT_DIR / "labels_template.csv"
-
-    with manifest_path.open("w", newline="", encoding="utf-8") as mf, labels_path.open(
-        "w", newline="", encoding="utf-8"
-    ) as lf:
-        manifest_writer = csv.DictWriter(
-            mf,
-            fieldnames=[
-                "id",
-                "stem",
-                "source_jpg",
-                "board_id",
-                "captured_at",
-                "center_lon",
-                "center_lat",
-                "lat_band",
-                "white_frac_proxy",
-                "stratum",
-                "preview_jpg",
-            ],
-        )
-        labels_writer = csv.DictWriter(
-            lf,
-            fieldnames=["id", "stem", "cloud_pct", "reject_75", "notes"],
-        )
-        manifest_writer.writeheader()
-        labels_writer.writeheader()
-
-        for idx, meta in enumerate(selected, start=1):
-            preview_name = f"{idx:02d}_{meta.stem}.jpg"
-            preview_path = images_dir / preview_name
-            write_thumbnail(meta.jpg_path, preview_path)
-            wf = white_fracs[meta.stem]
-            manifest_writer.writerow(
-                {
-                    "id": idx,
-                    "stem": meta.stem,
-                    "source_jpg": str(meta.jpg_path),
-                    "board_id": meta.board_id,
-                    "captured_at": meta.captured_at.isoformat(sep=" "),
-                    "center_lon": f"{meta.center_lon:.6f}",
-                    "center_lat": f"{meta.center_lat:.6f}",
-                    "lat_band": lat_band(meta.center_lat),
-                    "white_frac_proxy": f"{wf:.4f}",
-                    "stratum": stratum_key(meta, wf),
-                    "preview_jpg": str(preview_path.relative_to(ROOT)),
-                }
-            )
-            labels_writer.writerow(
-                {
-                    "id": idx,
-                    "stem": meta.stem,
-                    "cloud_pct": "",
-                    "reject_75": "",
-                    "notes": "",
-                }
-            )
-
-    readme = OUT_DIR / "README.md"
-    readme.write_text(
-        """# Ручная разметка: 40 кадров Photos
+- Сид тот же (**42**), поэтому выборка на {n} — расширение выборки на 40, а не другая случайная пачка.
+- В этом наборе **{n_old}** кадров уже были в `labeling/photos_40/`.
+- У **{n_masked}** из них уже есть маска CVAT. В `labels_template.csv` у них в `notes` стоит `already_masked_in_photos_40` — эти можно не размечать заново.
+- Остальные кадры новые. Колонка `in_photos_40` в `manifest.csv`: `1` если кадр из старого набора.
+"""
+    return f"""# Ручная разметка: {n} кадров Photos
 
 ## Где смотреть картинки
 
@@ -248,16 +293,123 @@ def main() -> None:
 | `notes` | Опционально: `snow`, `haze`, `desert`, `ocean`, `night`, `hard` |
 
 Сохрани файл как `labels.csv` рядом (или просто допиши `labels_template.csv`).
-
+{overlap}
 ## Важно
 
 - `white_frac_proxy` в манифесте — **не** твоя метка, а грубый автоматический прокси для стратификации выборки.
-- Сид выборки: **42** (скрипт `select-photos-40`).
-""",
+- Сид выборки: **42** (скрипт `{script}`).
+"""
+
+
+def main() -> None:
+    """Собирает ``labeling/photos_<n>/``: превью, манифест, шаблон меток."""
+    args = parse_args()
+    n_select = args.n
+    out_dir = args.out if args.out is not None else ROOT / "labeling" / f"photos_{n_select}"
+    track_old = n_select != N_SELECT
+    old_stems, masked_stems = load_photos_40_stems(ROOT) if track_old else (set(), set())
+
+    set_global_seed(DEFAULT_SEED)
+    rng = np.random.default_rng(DEFAULT_SEED)
+
+    if not PHOTOS_DIR.is_dir():
+        raise FileNotFoundError(f"Нет папки Photos: {PHOTOS_DIR}")
+
+    print("Читаю KML…")
+    metas = iter_photo_meta(PHOTOS_DIR)
+    print(f"Кадров с KML: {len(metas)}")
+
+    print("Считаю прокси-белизну (это не метки)…")
+    white_fracs = compute_white_fracs(metas, args.workers)
+
+    selected = stratified_sample(metas, white_fracs, n_select, rng)
+    selected = sorted(selected, key=lambda m: m.stem)
+
+    images_dir = out_dir / "images"
+    if images_dir.exists():
+        shutil.rmtree(images_dir)
+    images_dir.mkdir(parents=True, exist_ok=True)
+
+    manifest_path = out_dir / "manifest.csv"
+    labels_path = out_dir / "labels_template.csv"
+    id_width = 3 if n_select >= 100 else 2
+    manifest_fields = [
+        "id",
+        "stem",
+        "source_jpg",
+        "board_id",
+        "captured_at",
+        "center_lon",
+        "center_lat",
+        "lat_band",
+        "white_frac_proxy",
+        "stratum",
+        "preview_jpg",
+    ]
+    if track_old:
+        manifest_fields.append("in_photos_40")
+
+    n_old = 0
+    n_masked = 0
+    with manifest_path.open("w", newline="", encoding="utf-8") as mf, labels_path.open(
+        "w", newline="", encoding="utf-8"
+    ) as lf:
+        manifest_writer = csv.DictWriter(mf, fieldnames=manifest_fields)
+        labels_writer = csv.DictWriter(
+            lf,
+            fieldnames=["id", "stem", "cloud_pct", "reject_75", "notes"],
+        )
+        manifest_writer.writeheader()
+        labels_writer.writeheader()
+
+        for idx, meta in enumerate(selected, start=1):
+            preview_name = f"{idx:0{id_width}d}_{meta.stem}.jpg"
+            preview_path = images_dir / preview_name
+            write_thumbnail(meta.jpg_path, preview_path)
+            wf = white_fracs[meta.stem]
+            in_old = meta.stem in old_stems
+            has_mask = meta.stem in masked_stems
+            if in_old:
+                n_old += 1
+            if has_mask:
+                n_masked += 1
+            row = {
+                "id": idx,
+                "stem": meta.stem,
+                "source_jpg": str(meta.jpg_path),
+                "board_id": meta.board_id,
+                "captured_at": meta.captured_at.isoformat(sep=" "),
+                "center_lon": f"{meta.center_lon:.6f}",
+                "center_lat": f"{meta.center_lat:.6f}",
+                "lat_band": lat_band(meta.center_lat),
+                "white_frac_proxy": f"{wf:.4f}",
+                "stratum": stratum_key(meta, wf),
+                "preview_jpg": str(preview_path.relative_to(ROOT)),
+            }
+            if track_old:
+                row["in_photos_40"] = "1" if in_old else "0"
+            manifest_writer.writerow(row)
+            notes = "already_masked_in_photos_40" if has_mask else ""
+            labels_writer.writerow(
+                {
+                    "id": idx,
+                    "stem": meta.stem,
+                    "cloud_pct": "",
+                    "reject_75": "",
+                    "notes": notes,
+                }
+            )
+
+    readme = out_dir / "README.md"
+    readme.write_text(
+        readme_text(n_select, n_old, n_masked),
         encoding="utf-8",
     )
 
-    print(f"Готово: {len(selected)} кадров → {OUT_DIR}")
+    print(f"Готово: {len(selected)} кадров → {out_dir}")
+    if track_old:
+        print(f"Из них уже в photos_40: {n_old}, с маской CVAT: {n_masked}")
+        print(f"Новых кадров: {len(selected) - n_old}")
     print(f"Смотри превью: {images_dir}")
     print(f"Пиши метки в: {labels_path}")
 

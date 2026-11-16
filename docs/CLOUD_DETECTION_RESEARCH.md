@@ -1,162 +1,275 @@
-# Исследование: модели детекции облаков (пруфы и ссылки)
+# Исследование: модели детекции облаков
 
-Дата обзора: **2026-11-15**.  
-Цель: не цепляться за Cloud-Net / 38-Cloud, а понять, что реально свежее и что переносимо на **RGB Photos** (кубсаты, ~200 м/пкс).
+Сегментация облаков на оптических снимках — зрелый трек remote sensing: от порогов вроде Fmask до специализированных CNN, attention/transformer-сетей и дальше к foundation-моделям с лёгкими адаптерами. Этот файл — обзор моделей и сравнительных таблиц для related work: что предложили, как устроено, какие цифры стоят в статьях и на живых лидербордах — плюс короткий вывод, **что из этого полезно кейсу**.
 
-**Важно про 2026:** да, новые модели уже есть. Тренд — foundation models + adapters, Mamba, semi-supervised, кросс-сенсор (Swin+UPerNet). Cloud-Net (2019) / Cloud-Net+ (2020–21) — исторический ориентир на узком бенчмарке, не актуальный «единственный SOTA».
+Три внешние опоры сравнения:
+
+- [38-Cloud (test) на sota2](https://www.sota2.com/research/sota/cloud-detection-on-38-cloud-test) — классика ~2019–2020;
+- [GF1_WHU (test) на sota2](https://www.sota2.com/research/sota/cloud-detection-on-gf1_whu-test) — уже 2026-й зоопарк;
+- [Cloud-Adapter (TGRS 2025)](https://xavierjiezou.github.io/Cloud-Adapter/) — кросс-сенсорное сравнение на шести сетах.
 
 ---
 
-## 1. Лидерборды и сводные таблицы (пруфы цифр)
+## Cloud-Net (2019) — фундамент DL-сегментации облаков
 
-| Источник | Что показывает | Ссылка |
-|----------|----------------|--------|
-| Papers With Code — task Cloud Detection | список papers with code; лидерборды по датасетам часто пустые/устаревшие | https://paperswithcode.com/task/cloud-detection |
-| 38-Cloud semantic segmentation archive | Cloud-Net+ **88.90** Jaccard, Cloud-Net **87.32** (снимок ~2025-07; новых строк почти нет) | https://codewithpapers.app/sota/semantic-segmentation-on-38-cloud |
-| Wizwand — 95-Cloud | SOTA Jaccard **91.57** (часто Cloud-Net+ линия) | https://www.wizwand.com/dataset/95-cloud |
-| Wizwand — SPARCS 5CV | Cloud-Net+ FJL2 Jaccard **83.14** | https://www.wizwand.com/sota/cloud-detection-on-sparcs-5cv |
-| **cloudseg / Cloud-Adapter leaderboard** | единый mIoU на HRC / GF1 / GF2 / Sentinel L1C / L2A / L8 Biome — **лучший живой кросс-сет** | https://github.com/XavierJiezou/cloudseg · https://xavierjiezou.github.io/Cloud-Adapter/ |
-| Awesome Cloud Detection and Removal | каталог датасетов и papers | https://github.com/PeeBar/Awesome-Cloud-Detection-and-Removal |
+**Статья:** [arXiv:1901.10077](https://arxiv.org/abs/1901.10077)  
+*Cloud-Net: An End-to-End Cloud Detection Algorithm for Landsat 8 Imagery* (Mohajerani & Saeedi).
 
-### Таблица cloudseg (mIoU %, ↑) — снимок с GitHub Cloud-Adapter
+До Cloud-Net использовали пороги (Fmask и родственники), handcrafted-признаки и отдельные CNN, которые классифицировали куски кадра. Cloud-Net сдвинула задачу в привычный сейчас формат: **end-to-end пиксельная маска** на патч Landsat-8, без суперпиксельного препроцессинга и без ручного decision tree. Именно поэтому работу до сих пор цитируют как исторический baseline.
+
+### Как устроена сеть
+
+Архитектура — **Fully Convolutional Network** с двумя ветвями:
+
+- **contracting arm** (энкодер) сжимает карту и копит признаки;
+- **expanding arm** (декодер) поднимает разрешение и собирает soft-маску «облако / clear».
+
+Свёрточные блоки заточены под семантику облаков: и локальная текстура, и более широкий контекст сцены. Внутри блоков — **shortcut-связи** (Concat / Copy / Addition). Между двумя руками тоже есть связи.
+
+Вход оригинала: **четыре канала** Landsat-8 (Band 2–5 ≈ B/G/R/Nir). Большие сцены режут на патчи 384², перед сетью даунсайзят до **192×192×4**. Выход — одноканальная вероятность того же размера, потом бинаризация. Loss — **soft Jaccard**, оптимизатор Adam, аугментации flip / rotate / zoom.
+
+### Метрики из статьи (38-Cloud test)
+
+| Method | Jaccard | Precision | Recall | Specificity | Overall Accuracy |
+|--------|--------:|----------:|-------:|------------:|-----------------:|
+| FCN (тот же train, ручные GT) | 72.17 | 84.59 | 81.37 | 98.45 | 95.23 |
+| Fmask | 75.16 | 77.71 | 97.22 | 93.96 | 94.89 |
+| **Cloud-Net** | **78.50** | **91.23** | **84.85** | **98.67** | **96.48** |
+
+Заявленный прирост к FCN — **+8.7 п.п. Jaccard**. Fmask ловит облака агрессивно (высокий recall), но шумит — Jaccard и precision ниже.
+
+### Что нам дала
+
+Cloud-Net по сути показала: **encoder–decoder в духе U-Net** нормально тянет сегментацию облаков — сама сеть из этой линии. Полную Cloud-Net «как в статье» брать не вышло: на входе **четыре канала (RGB+NIR)**, а целевой продукт кейса — **RGB**. Отсюда рабочий выбор — RGB U-Net (ResNet34), а не порт 4-канальной Cloud-Net.
+
+---
+
+## Cloud-Net+ и Filtered Jaccard Loss (2020/21)
+
+**Статья:** [arXiv:2001.08768](https://arxiv.org/abs/2001.08768)  
+*Cloud and Cloud Shadow Segmentation … via Filtered Jaccard Loss Function and Parametric Augmentation*.
+
+Cloud-Net+ — развитие Cloud-Net: чуть переработанная сеть плюс работа с **тенями**, расширение данных (95-Cloud) и, главное, новый loss. Архитектурно это всё ещё специализированный FCN под облака/тени. Настоящий сюжет статьи — **Filtered Jaccard Loss (FJL)**.
+
+### Зачем FJL
+
+Обычный soft Jaccard (\(J_L\)) хорошо стыкует предсказание с GT, пока в маске **есть** облака. Но когда патч полностью clear, положительного класса нет — soft Jaccard ведёт себя нечестно: модель плохо учится «правильно быть пустой», clear-регионы недонаграждаются и недоштрафуются. Для спутниковых сцен это обыденность: много чистого неба и суши.
+
+FJL смотрит на долю foreground \(S\) в GT и **переключает** режим:
+
+- если \(S \approx 0\) (почти/полностью clear) → компенсаторная ветка \(G_L\);
+- если \(S > 0\) → обычный soft Jaccard \(J_L\);
+- переключение не жёсткий `if`, а сглаженные lowpass/highpass через sigmoid — дифференцируемо, без скачков градиента.
+
+Две версии по выбору \(G_L\):
+
+- **FJL1** — inverted Jaccard по комплементам (clear играет роль «позитива»);
+- **FJL2** — нормализованный cross-entropy как компенсатор.
+
+Авторы показывают: FJL лучше держит thick/thin cloud и haze над снегом, чем голый CE или голый Jaccard. Параллельно вводят SDAA — sunlight direction-aware augmentation для теней (синтетические тени по солнечному азимуту/зениту).
+
+### Метрики из статьи (облака, %)
+
+| Протокол | Loss | Jaccard | Precision | Recall | Accuracy |
+|----------|------|--------:|----------:|-------:|---------:|
+| 38-Cloud train→test | soft Jaccard \(J_L\) | 88.41 | 97.44 | 90.51 | 96.21 |
+| 38-Cloud | **FJL1** | **88.85** | 97.39 | **91.01** | **96.35** |
+| 38-Cloud | CE | 87.71 | 97.25 | 89.94 | 95.97 |
+| 38-Cloud | FJL2 | 88.26 | **97.70** | 90.13 | 95.91 |
+| SPARCS folds 2–5 → fold 1 | FJL1 | 83.99 | 92.23 | 90.37 | 95.30 |
+| SPARCS fold 1 | **FJL2** | **85.11** | 93.43 | 90.52 | 95.68 |
+
+На 38-Cloud оба FJL выигрывают у «родительских» loss’ов. На SPARCS разрыв ещё заметнее: FJL2 на fold 1 даёт Jaccard **85.11** против ~81.5–81.8 у CE / \(J_L\). Коротко: Cloud-Net+ важен не как «ещё +1% сети», а как аккуратный ответ на clear-кадры и тонкие облака через loss.
+
+### Что нам дала
+
+Главный перенос — не «ещё одна сеть», а **дизайн loss под Jaccard / clear-кадры**. Идея FJL (и soft Jaccard рядом с ней) объясняет, почему для облаков мало одного CE. В обучении кейса устойчивым дефолтом остался **Dice+BCE**; Jaccard-член в литературе — понятный следующий рычаг, если понадобится крутить overlap-метрику.
+
+---
+
+## CDNet / CDNetV2 (2021) — RGB-thumbnails и cloud↔snow
+
+**Статья CDNetV2:** [IEEE TGRS](https://doi.org/10.1109/tgrs.2020.2991398)  
+*CDnetV2: CNN-Based Cloud Detection for Remote Sensing Imagery With Cloud-Snow Coexistence*.
+
+Другая ветка классики: не полный MSI-стек Landsat, а **thumbnail RGB** — уже потеряны разрешение и часть спектра, зато маску нужно вытащить быстро. Отдельная боль — сосуществование облаков и снега.
+
+CDNetV2 — encoder–decoder. Относительно CDNetV1 добавлены два блока:
+
+- **AFFM** (adaptive feature fusing) — сливает multilevel-фичи через channel attention (CAFM), spatial attention (SAFM) и refinement (CARM);
+- **HSIGF** — high-level semantic information guidance flows: семантика «где облако» проталкивается в слои декодера через HFFM, чтобы признаки не «размывались» по уровням.
+
+На странице Cloud-Adapter CDNetV2 фигурирует как устойчивый RGB-baseline кросс-сенсорной таблицы (mIoU %): HRC **76.75**, GF1 **84.93**, GF2 **78.84**, L1C **65.60**, L2A **66.05**, L8B **43.63**. Для своего времени — сильный thumbnail-CNN; на современных мультисенсорных протоколах его обходят adapter/VFM-линии, но идея «облака по грубому RGB» остаётся в related work.
+
+### Что нам дала
+
+Пруф, что **облака можно сегментировать по RGB без полного спектрального стека** — даже на «бедных» thumbnail-кадрах, с путаницей cloud↔snow. Для кубсатных RGB Photos это ближе по духу, чем Landsat RGBNir Cloud-Net: задача не обязана жить только на 4 каналах.
+
+---
+
+## SegFormer-B2 — efficient transformer для сегментации
+
+**Оригинал SegFormer:** [arXiv:2105.15203](https://arxiv.org/abs/2105.15203) (Xie et al., NeurIPS 2021) — иерархический MiT-энкодер + лёгкий MLP-декодер.  
+**В облачном контексте:** сравнение SegFormer vs U-Net / DeepLab на Sentinel-2 Cloud Mask Catalogue ([WCAMA 2025](https://doi.org/10.5753/wcama.2025.7754)) — у SegFormer IoU **~0.85**, выше классических CNN-бейзлайнов на их протоколе.
+
+### Идея архитектуры
+
+SegFormer — практичный сегментатор:
+
+- **MiT (Mix-Transformer) encoder** — иерархические признаки на нескольких масштабах, без позиционных эмбеддингов в стиле классического ViT;
+- **лёгкий All-MLP decoder** — сливает multi-scale фичи без тяжёлого mask transformer à la Mask2Former.
+
+### Зачем это вообще смотреть на облаках
+
+Transformer-энкодер лучше тянет **длинный контекст** по кадру (крупные облачные системы, неоднородный фон), при этом SegFormer остаётся относительно эффективным по сравнению с тяжёлыми ViT-сегментаторами. Литература на Sentinel уже ставит его выше U-Net/DeepLab на публичном протоколе — логичный mid-tier кандидат рядом с CNN-baseline.
+
+### Прогон в кейсе
+
+SegFormer-B2 обучен на том же weighted mix, image **512**, T4. Best **val IoU ~0.885**. На ориентире **Photos-8**: IoU **~0.205**, MAE% **~39**, reject@75 **0.75** — заметно слабее U-Net ResNet34 на целевом домене (у U-Net Photos IoU **~0.49**).
+
+### Что нам дала
+
+Сильный **контрастный эксперимент**: transformer-энкодер отлично выглядит на публичном val, но **не перенёс преимущество на Photos**. Для продукта важнее поведение на кубсатах, чем +0.00x IoU на HRC — поэтому победителем кейса остаётся **U-Net**, а SegFormer остаётся честным «мы проверили mid-tier transformer».
+
+---
+
+## Cloud-Adapter (2025) — frozen VFM + кросс-сенсор
+
+**Страница:** https://xavierjiezou.github.io/Cloud-Adapter/  
+**Статья:** TGRS 2025 / [arXiv:2411.13127](https://arxiv.org/abs/2411.13127)  
+*Adapting Vision Foundation Models for Robust Cloud Segmentation in Remote Sensing Images*.
+
+Пока 38-Cloud живёт в мире Jaccard ~2020, Cloud-Adapter делает неприятную, но правильную вещь: **одна постановка на куче сенсоров сразу** — HRC, GF1, GF2, Sentinel L1C/L2A, Landsat-8 Biome (L8B). Binary cloud и multi-class (thick / thin / shadow) в одной картине.
+
+### Идея
+
+Не дообучать весь гигантский vision foundation model. Бэкбон (**VFM**, transformer) **заморожен**. Сбоку — лёгкий adapter (~**0.6%** обучаемых параметров):
+
+1. **Spatial perception** — ConvNet снимает плотные пространственные признаки на нескольких масштабах;
+2. **Adapting module** — агрегированный контекст модулирует замороженные transformer-слои VFM.
+
+Смысл: сохранить обобщение foundation-модели и дёшево подстроиться под облака и разные сенсоры, вместо full finetune всего бэкбона.
+
+### Сравнительная таблица со страницы проекта (mIoU %, ↑)
 
 | Method | HRC | GF1 | GF2 | L1C | L2A | L8B |
-|--------|-----|-----|-----|-----|-----|-----|
+|--------|----:|----:|----:|----:|----:|----:|
 | CDNetv2 | 76.75 | 84.93 | 78.84 | 65.60 | 66.05 | 43.63 |
-| UNetMobv2 | 79.91 | 91.71 | **80.44** | 71.65 | 70.36 | 47.76 |
+| UNetMobv2 | 79.91 | 91.71 | 80.44 | 71.65 | 70.36 | 47.76 |
 | DBNet | 77.78 | 91.36 | 78.68 | 65.52 | 65.65 | **51.41** |
-| HRCloudNet | **83.44*** | 91.86 | 75.57 | 68.26 | 68.35 | 43.51 |
-| KappaMask | 67.48 | **92.42*** | 72.00 | 41.27 | 45.28 | 42.12 |
+| HRCloudNet | 83.44 | 91.86 | 75.57 | 68.26 | 68.35 | 43.51 |
+| KappaMask | 67.48 | **92.42** | 72.00 | 41.27 | 45.28 | 42.12 |
 | **Cloud-Adapter** | **89.05** | **92.55** | **83.02** | **74.18** | **73.38** | **57.53** |
 
-\* без Cloud-Adapter; с ним Cloud-Adapter лучший почти везде.  
-Источник: https://xavierjiezou.github.io/Cloud-Adapter/
+Читать таблицу стоит как стресс-тест, а не как «ещё +2%»:
 
-**Вывод по лидербордам:** на 38-Cloud «висит» Cloud-Net+, потому что новые работы редко пересдают этот протокол. На современных мультисенсорных сетах лидируют **Cloud-Adapter** и соседние VFM/adapter / high-res сети, не Cloud-Net.
+- на «удобных» GF1/HRC многие CNN уже сильные (UNetMobv2, HRCloudNet, KappaMask);
+- на **Sentinel L1C/L2A** и особенно **L8B** отрыв Cloud-Adapter жёсткий (L8B **57.53** против ~43–51 у соседей);
+- KappaMask может быть рядом на GF1 (**92.42**), но разваливается на L1C/L2A — типичный «один сенсор хорошо, кросс-сенсор плохо».
 
----
+Соседи по таблице тоже говорящие: **HRCloudNet** тянет high-res ветки (HRC **83.44**), **DBNet** — dual-branch CNN+Swin и лучше всех без adapter на L8B (**51.41**), **UNetMobv2** — сильный MobileNet-U-Net floor. Cloud-Adapter почти везде сверху при крошечном trainable footprint.
 
-## 2. Обзоры (каркас поля)
+### Что нам дала
 
-| Работа | Год | Ссылка | Заметка |
-|--------|-----|--------|---------|
-| Deep Learning-Based Cloud Detection for Optical Remote Sensing Images: A Survey | 2024 | https://doi.org/10.3390/rs16234583 | ~169 journal papers; после 2022 — рост attention/Transformer |
-| Cloud Detection Methods for Optical Satellite Imagery: A Comprehensive Review | 2025 | https://www.mdpi.com/2673-7418/5/3/27 | датасеты + методы |
-| An Introduction to Machine and Deep Learning Methods for Cloud Masking | 2024 | https://www.mdpi.com/2076-3417/14/7/2887 | masking overview |
+Свежий **SOTA-нарратив 2025** и аргумент для защиты: Jaccard на 38-Cloud ≠ готовность к чужому сенсору. Идея frozen VFM + tiny adapter — направление «как делают сейчас», когда нужен кросс-сенсор. В SMP-пайплайне кейса это отдельный стек (mmseg / DINOv2); практическим transformer-сравнением на том же миксе стал SegFormer-B2.
 
 ---
 
-## 3. Хронология моделей (с пруфами)
+## CloudMamba (2026) — uncertainty + dual-scale Mamba
 
-### 2019–2021 — «классика Landsat / 38-Cloud»
+**Статья:** [arXiv HTML](https://arxiv.org/html/2604.06844) · код: https://github.com/jayoungo/CloudMamba  
+*CloudMamba: An Uncertainty-Guided Dual-Scale Mamba Network for Cloud Detection in Remote Sensing Imagery*.
 
-| Модель | Год | Ссылка | Метрики / идея | Нам полезно? |
-|--------|-----|--------|----------------|--------------|
-| **Cloud-Net** | 2019 | https://arxiv.org/abs/1901.10077 | FCN на RGBNir, 38-Cloud | Исторический baseline; 4 канала ≠ Photos |
-| **Cloud-Net+** | 2020/21 | https://arxiv.org/abs/2001.08768 | FJL loss, чуть легче Cloud-Net; Jaccard ~**88.9** на 38-Cloud | **Loss (FJL)** — да; архитектура — не цель |
-| **Cloud-AttU** | 2020 | https://doi.org/10.3390/sym12061056 | U-Net + attention | Идея attention gates |
-| **CDNet / CDNetV2** | 2019/21 | https://doi.org/10.1109/tgrs.2020.2991398 | thumbnail RGB, cloud–snow, AFFM | Близко к «грубым» кадрам кубсатов |
-| **nnU-Net** (On Cloud N) | 2022 | https://arxiv.org/abs/2210.13659 | Jaccard **0.882** на Sentinel challenge (top ~7%) | «Сильный U-Net без ручного дизайна» |
+Однопроходная бинарная сегментация часто плывёт на **thin cloud**, рваных кусках и границах: спектр и текстура пересекаются с фоном, уверенность модели низкая, а «второй попытки» нет. CloudMamba отвечает двумя ходами.
 
-### 2022–2024 — attention, dual-branch, high-res
+### Идея
 
-| Модель | Год | Ссылка | Метрики / идея | Нам полезно? |
-|--------|-----|--------|----------------|--------------|
-| **SEUNet++** | 2022 | https://doi.org/10.1016/j.eswa.2022.118493 | U-Net++ + SE; IoU **91.8%** на 95-Cloud | Простой сильный RGB/MSI путь + ImageNet |
-| **CLiSA / C-LiSA** | 2023–24 | https://arxiv.org/abs/2311.17475 · https://doi.org/10.1109/tgrs.2024.3394929 | hybrid transformer; Biome/SPARCS/Sentinel/Cartosat; абляции RGB | **Кросс-сенсор** — главный narrative кейса |
-| **DB-Net** | 2024 | https://doi.org/10.1117/1.JRS.18.034524 | CNN + Swin dual-branch | Thin/small clouds |
-| **HR-cloud-Net** | 2024 | https://arxiv.org/html/2407.07365 · code https://github.com/kunzhan/hr-cloud-net | high-res branches; HRC mIoU **83.44** | Границы/текстура |
-| **SegFormer** vs U-Net (Sentinel) | 2025 | https://doi.org/10.5753/wcama.2025.7754 | SegFormer IoU **0.85** > U-Net / DeepLab | Практичный SMP-кандидат |
+1. **Uncertainty-guided two-stage.** После первого прохода модуль оценивает попиксельную уверенность; low-confidence зоны (тонкие облака, размытые края) уходят во **второй stage** — локальный refinement. Схема «глобально нашли → локально поправили hard regions».
+2. **Dual-scale CNN–Mamba (DS-Mamba).** CNN держит локальную текстуру; Mamba (state-space) тянет long-range зависимости с **линейной** сложностью вместо квадратичного self-attention. Dual-scale: крупная ветка ловит макроструктуру облака, мелкая — границы и фрагменты.
 
-### 2025 — foundation adapters и сильные CNN
+### Метрики из статьи (Table I)
 
-| Модель | Год | Ссылка | Метрики / идея | Нам полезно? |
-|--------|-----|--------|----------------|--------------|
-| **Cloud-Adapter** (TGRS) | 2025 | paper https://arxiv.org/abs/2411.13127 · site https://xavierjiezou.github.io/Cloud-Adapter/ · code https://github.com/XavierJiezou/cloudseg | frozen VFM + adapter (~0.6% params); **SOTA** на HRC/GF/Sentinel/L8B | Свежий SOTA-слайд; внедрение тяжелее |
-| **NFCNet** | 2025 | https://pmc.ncbi.nlm.nih.gov/articles/PMC11861746/ · https://doi.org/10.3390/s25041245 | HCAM/SPFA/DCA; бьёт UNet/DeepLab/Cloud-AttU на HRC, CHLandsat8, **95-Cloud (RGB)** | Хорошие идеи под RGB |
-| **TransCNet** | 2025 | https://doi.org/10.3390/app15189870 | ResNet-34 + PVT, RGB 352²; vs Cloud-Net, CDNetV2, SegFormer | Dual-branch RGB story |
-| **MSCloudCAM** | 2025–26 | https://arxiv.org/abs/2510.10802 | multi-scale CAM; CloudSEN12 + L8Biome | MSI; для Photos вторично |
+| Method | GF1_WHU mIoU | GF1 F1 | GF1 OA | Levir_CS mIoU | Levir F1 | Levir OA |
+|--------|-------------:|-------:|-------:|--------------:|---------:|---------:|
+| U-Net | 84.72 | 91.73 | 95.46 | 89.43 | 94.42 | 97.96 |
+| DeepLabV3+ | 86.66 | 92.85 | 95.91 | 81.10 | 89.56 | 96.10 |
+| U-Mamba | 86.94 | 93.01 | 95.96 | 90.78 | 95.17 | 98.22 |
+| **CloudMamba** | **89.27** | **94.33** | **96.78** | **91.24** | **95.42** | **98.31** |
 
-### 2026 — да, уже есть новое (на момент 2026-11)
+На GF1_WHU CloudMamba обходит ближайшего конкурента (BoundaryNets в абляциях/лидерборде) примерно на **+1.4** mIoU; на Levir_CS прирост к U-Mamba скромнее (~**+0.5** mIoU), но стабилен по всем трём метрикам. U-Net на том же протоколе — **84.72** mIoU: удобный floor «сильный классический сегментатор».
 
-| Модель / работа | Когда | Ссылка | Суть | Нам полезно? |
-|-----------------|-------|--------|------|--------------|
-| **STUPmask** (Swin + UPerNet) | RSE, online ~2026-01 (DOI 2025.115206) | https://doi.org/10.1016/j.rse.2025.115206 · PDF https://weijing-rs.github.io/publications/Pang_et_al-RSE-2026.pdf | OA **97.51%** L8, **96.27%** S2; IoU ~**92–93%**; transfer GF-2 / MODIS / Himawari | **Сильный кросс-сенсор** — близко к задаче Photos |
-| **CloudMamba** | TGRS 2026 | https://arxiv.org/html/2604.06844 · code https://github.com/jayoungo/CloudMamba | CNN–Mamba + uncertainty 2-stage; GF1 mIoU **89.27**, Levir_CS **91.24** | Thin clouds / boundaries; свежий SOTA на GF1/Levir |
-| **DinoCloudNet** | JSTARS 2026 | https://doi.org/10.1109/jstars.2026.3690021 | frozen DINOv3 + ECA-SPM + MGFF adapter | Эволюция Cloud-Adapter линии |
-| **Lightweight dual-path + gated fusion** | Sensors 2026 | https://pmc.ncbi.nlm.nih.gov/articles/PMC12987299/ | HRC OA **96.31%**, mIoU **92.82%**, **12 GFLOPs** | Лёгкая модель — дружит с 4060 / onboard story |
-| **F1-weighted ensemble** | Sci Rep 2026 | https://www.nature.com/articles/s41598-026-58959-0 | ансамбль DL; F1 ~**90.25%**, OA ~**95.47%** | Скорее идея fusion, не одна сеть |
-| **CloudMatch** | 2026 | https://arxiv.org/html/2601.03528 | semi-supervised weak→strong | Мало разметки Photos — релевантно |
-| **Low-data supervised adaptation > prompting** | 2026 | https://arxiv.org/pdf/2604.08956 | CLIPSeg prompts проигрывают; **0.1–10% labels** уже сильно лучше | Пруф: на Photos нужны метки / finetune, не «промпт» |
-| **TIRAuxCloud** | 2026 | https://arxiv.org/html/2602.21905v2 | day/night TIR датасет | Нам не целевой (у Photos RGB day) |
+### Что нам дала
 
-**CloudMamba vs baselines (из статьи, Table I):**
-
-| Method | GF1_WHU mIoU | Levir_CS mIoU |
-|--------|--------------|---------------|
-| U-Net | 84.72 | 89.43 |
-| DeepLabV3+ | 86.66 | 81.10 |
-| U-Mamba | 86.94 | 90.78 |
-| **CloudMamba** | **89.27** | **91.24** |
-
-Источник: https://arxiv.org/html/2604.06844
+Ориентир **2026**: thin clouds / границы лечат не только «более глубоким U-Net», а uncertainty + multi-scale long-range (Mamba). Цифра U-Net **84.72** mIoU на GF1 — удобный литературный якорь рядом с нашим выбором U-Net как сильного простого сегментатора. Порт Mamba-стека под дедлайн кейса не цель; содержание — в related work и на слайде «куда поле ушло».
 
 ---
 
-## 4. Датасеты (почему 38-Cloud ≠ «единственный мир»)
+## Лидерборд 38-Cloud (test) — музей классики ~2019–2020
 
-| Датасет | Ссылка / заметка | Зачем в обзоре |
-|---------|------------------|----------------|
-| 38-Cloud | Mohajerani; RGBNir Landsat-8 | У нас есть; удобный train; **не** похож 1:1 на Photos |
-| 95-Cloud | расширение 38-Cloud | Больше данных того же семейства |
-| SPARCS | Landsat patches | Holdout / тени |
-| HRC_WHU | high-res 0.5–15 m | Границы, разнообразие фона |
-| GF1-WHU / Levir_CS | китайские HR | CloudMamba / CDNet бенчмарки |
-| CloudSEN12 / L8 Biome | Sentinel multi-class | Cloud-Adapter / MSCloudCAM |
-| Sentinel-2 Cloud Mask Catalogue | Francis et al. | RGB(+bands) сравнения SegFormer |
+Источник: https://www.sota2.com/research/sota/cloud-detection-on-38-cloud-test
 
-Мы используем 38-Cloud, потому что **скачали**, а не потому что он лучший прокси Photos.
+Здесь живут **старые** записи: Cloud-Net / Cloud-Net+ / Cloud-AttU / Fmask / U-Net. Foundation-модели 2025–26 этот протокол почти не пересдают — поэтому «король 38-Cloud» ≠ «король облаков вообще».
 
----
+| Method | Метка на странице | Jaccard | Precision | Recall | Overall Accuracy |
+|--------|-------------------|--------:|----------:|-------:|-----------------:|
+| **Cloud-Net+ (FJL1)** | 2020.01 | **88.85** | 97.39 | 91.01 | 96.35 |
+| Cloud-Net+ (FJL2) | 2020.01 | 88.76 | **97.70** | 90.13 | 95.91 |
+| Cloud-AttU | 2020.01 | 88.72 | 97.16 | **91.30** | **97.05** |
+| Cloud-Net | 2020.01 | 87.32 | 97.60 | 89.23 | 95.86 |
+| Fmask V3 | 2020.01 | 85.91 | 88.65 | 96.52 | 94.94 |
+| U-Net | 2020.01 | 85.03 | 96.15 | 88.02 | 95.05 |
+| Cloud-Net (статья 2019) | 2019.01 | 78.50 | 91.23 | 84.85 | 96.48 |
+| Fmask | 2019.01 | 75.16 | 77.71 | 97.22 | 94.89 |
+| FCN | 2019.01 | 72.17 | 84.59 | 81.37 | 95.23 |
 
-## 5. Что это значит для кейса СПУТНИКС
+Что видно:
 
-Критерий успеха кейса: **% облачности + reject@75 на Photos**, не Jaccard на 38-Cloud.
+1. **FJL реально двигает стрелку** — Cloud-Net+ с FJL1/FJL2 наверху; разница между FJL1 и FJL2 небольшая.
+2. **Cloud-AttU** почти догоняет по Jaccard и выигрывает OA/recall — attention на U-Net в том же году уже конкурирует.
+3. Обычный **U-Net (85.03)** ниже спец. cloud-сетей, но лучше Fmask по Jaccard.
+4. Две строки Cloud-Net (**78.50** из статьи и **87.32** с меткой 2020.01) — разные точки сравнения на одном test; для цитирования оригинала безопаснее Table 1 статьи.
 
-**Железо:** локально **4060 8 GB** (baseline) + **Kaggle T4 16 GB** (современный прогон). Подробный выбор: [`MODEL_SELECTION_REPORT.md`](MODEL_SELECTION_REPORT.md) · скачать данные: [`DOWNLOAD_NOW.md`](DOWNLOAD_NOW.md).
-
-| Приоритет | Выбор | Почему |
-|-----------|-------|--------|
-| 1. Тренд 2025 на T4 | **Cloud-Adapter** (DINOv2-L + adapter, ≥16 GB) | SOTA-слайд + реальный train; код https://github.com/XavierJiezou/cloud-adapter |
-| 2. Baseline на 4060 | U-Net ResNet34 + Photos калибровка | Уже обучен; быстрые итерации |
-| 3. Mid-tier сравнение | SegFormer-B2 + soft Jaccard/FJL | Efficient transformer; не «вместо» Cloud-Adapter |
-| 4. Опц. 2026 | CloudMamba | Если успеют; риск 4ch→RGB для Photos |
-| 5. Домен | finetune / калибровка на `photos_40` | Готовых весов под кубсаты нет; arXiv:2604.08956 |
-| 6. Не цель | гнаться за 0.89 на official 38-Cloud с RGBNir Cloud-Net+ | Не наш сенсор |
+**Зачем нам эта сводка.** Каркас related work на классическом бенчмарке: где стоят Cloud-Net / FJL / U-Net относительно друг друга. Напоминание не путать «лидер 38-Cloud» с готовностью к другому сенсору или к Photos.
 
 ---
 
-## 6. Код / репозитории (для воспроизведения)
+## Лидерборд GF1_WHU (test) — как применяют модели ≈2026
 
-| Репо | Ссылка |
-|------|--------|
-| Cloud-Adapter (код) | https://github.com/XavierJiezou/cloud-adapter |
-| cloudseg + weights / leaderboard | https://github.com/XavierJiezou/cloudseg |
-| Cloud-Adapter project page | https://xavierjiezou.github.io/Cloud-Adapter/ |
-| Cloud-Adapter datasets (HF) | https://huggingface.co/datasets/XavierJiezou/cloud-adapter-datasets |
-| CloudMamba | https://github.com/jayoungo/CloudMamba |
-| HR-cloud-Net | https://github.com/kunzhan/hr-cloud-net |
-| Awesome list | https://github.com/PeeBar/Awesome-Cloud-Detection-and-Removal |
+Источник: https://www.sota2.com/research/sota/cloud-detection-on-gf1_whu-test
+
+Другой мир: GaoFen-1 / WHU, метрика **mIoU** (+ F1, OA), в таблице почти всё с меткой **2026.04**. Это ответ на вопрос «что сейчас делают на относительно современном бенчмарке».
+
+| Method | mIoU | F1 | Overall Accuracy |
+|--------|-----:|---:|-----------------:|
+| **CloudMamba** | **89.27** | **94.33** | **96.78** |
+| BoundaryNets | 87.86 | 93.54 | 96.32 |
+| U-Mamba | 86.94 | 93.01 | 95.96 |
+| DeepLabV3+ | 86.66 | 92.85 | 95.91 |
+| U-Net | 84.72 | 91.73 | 95.46 |
+| CloudU-Net | 84.47 | 91.58 | 95.32 |
+| DCNet | 84.07 | 91.35 | 95.23 |
+| CloudSegNet | 82.51 | 90.42 | 94.71 |
+| VM-UNet | 72.74 | 84.22 | 91.29 |
+
+Картина поля:
+
+- лидирует **CloudMamba** (Mamba + uncertainty two-stage);
+- рядом **BoundaryNets** и **U-Mamba** — акцент на границы и state-space бэкбоны;
+- **DeepLabV3+ / U-Net** остаются честным floor (**86.66 / 84.72**);
+- узкоспециализированные CloudU-Net / CloudSegNet на этом сете не выигрывают у сильного общего сегментатора + Mamba.
+
+U-Net → CloudMamba — примерно **+4.5 п.п. mIoU**: ощутимо, но не «другой порядок». Протокол нельзя смешивать с 38-Cloud Jaccard.
+
+**Зачем нам эта сводка.** Живой срез «как выглядят модели 2026» и где стоит обычный U-Net как floor. Удобно рядом с CloudMamba в related work и чтобы не смешивать GF1 mIoU с 38-Cloud Jaccard.
 
 ---
 
-## 7. Как обновлять этот файл
+## Как три опоры складываются вместе
 
-1. Раз в этап кейса — прогнать поиск: `cloud detection remote sensing 2026`, `cloud segmentation foundation model`, CloudSEN12 leaderboard.  
-2. Новые цифры класть **только со ссылкой** (DOI / arXiv / GitHub table).  
-3. Отдельно помечаить: *метрика на каком датасете* — нельзя смешивать 38-Cloud Jaccard и HRC mIoU.
+| Опора | Эпоха | Метрика | Чему учит |
+|-------|-------|---------|-----------|
+| 38-Cloud sota2 | ~2019–2020 | Jaccard | Cloud-Net → FJL → attention; классика спец. CNN |
+| GF1_WHU sota2 | ~2026 | mIoU | Mamba / boundary-сети обходят U-Net/DeepLab |
+| Cloud-Adapter page | 2025 | mIoU × 6 сенсоров | frozen VFM + adapter выигрывает там, где узкие модели ломаются |
 
-Связанный обзор датасетов (что качать, размеры, на чём учили SOTA): [`CLOUD_DATASETS.md`](CLOUD_DATASETS.md).  
-Канонический отчёт по данным + EDA: [`DATASETS_REPORT.md`](DATASETS_REPORT.md).  
-Выбор моделей для кейса: [`MODEL_SELECTION_REPORT.md`](MODEL_SELECTION_REPORT.md).  
-Старый черновик про железо/протокол: [`SOTA_GAP.md`](SOTA_GAP.md).
+Три разные истории рядом — нормально. Путать их в одну таблицу «кто круче» — нет.

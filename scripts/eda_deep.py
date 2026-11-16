@@ -221,7 +221,8 @@ def load_sparcs(rng: random.Random) -> dict:
         if set(np.unique(mask_arr).tolist()) <= {0, 1}:
             cloud = mask_arr >= 1
         else:
-            cloud = np.isin(mask_arr, [2, 5])
+            # USGS SPARCS: 5 = cloud (не 2=water)
+            cloud = mask_arr == 5
         frac = float(cloud.mean())
         cloud_fracs.append(frac)
         rgb = resize_rgb(rgb_full)

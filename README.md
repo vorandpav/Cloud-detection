@@ -14,10 +14,12 @@
 
 ```bash
 uv sync
-# данные: data/hrc_whu, data/sparcs (или sending), data/38-cloud, Photos/
+# данные: data/hrc_whu, data/sparcs (или sending), data/38-cloud,
+# data/gf12ms_whu_gf1, data/s2_catalogue, Photos/
+# hrc первым: val = HRC test. Не перезаписывать старый run-name.
 uv run train-mix --model unet --device-plan 4060 \
-  --datasets hrc,sparcs,cloud38 --epochs 20 --batch-size 4 --seed 42 \
-  --run-name unet_mix_hrc_sparcs_38_4060
+  --datasets hrc,sparcs,cloud38,gf1,s2 --epochs 20 --batch-size 4 --seed 42 \
+  --run-name unet_mix_hrc_sparcs_38_gf1_s2_4060
 ```
 
 Сид по умолчанию: **42**. Правила кода: [`AGENTS.md`](AGENTS.md).

@@ -1,9 +1,11 @@
-"""Обучение U-Net / SegFormer на взвешенном миксе датасетов.
+"""Обучение U-Net / SegFormer / Cloud-Net на взвешенном миксе датасетов.
 
 Примеры::
 
     uv run train-mix --model unet --datasets hrc,sparcs --epochs 1 --max-items 16
     uv run train-mix --model segformer_b2 --device-plan 4060 --datasets hrc,cloud38
+    uv run train-mix --model cloudnet --datasets hrc,sparcs,cloud38 --encoder-weights none
+    uv run train-mix --model cloudnet_plus --loss fjl1 --encoder-weights none
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from torch.utils.data import DataLoader
 
 from cloudness_detection.data.common import enable_cubesat_augs
 from cloudness_detection.data.mix import (
+    DEFAULT_WEIGHTS,
     DEVICE_PLANS,
     WeightedMixedDataset,
     build_datasets,
@@ -31,7 +34,8 @@ from cloudness_detection.data.mix import (
     resolve_data_root,
     resolve_project_root,
 )
-from cloudness_detection.losses.soft_jaccard import DiceBCELoss
+from cloudness_detection.losses.filtered_jaccard import FilteredJaccardLoss
+from cloudness_detection.losses.soft_jaccard import DiceBCELoss, SoftJaccardLoss
 from cloudness_detection.metrics import dice_binary, iou_binary, mae_cloud_percent
 from cloudness_detection.models.build import build_model
 from cloudness_detection.seed import DEFAULT_SEED, set_global_seed
@@ -177,13 +181,25 @@ def plot_curves(history: list[dict[str, float]], out_dir: Path) -> None:
 def parse_args() -> argparse.Namespace:
     """CLI."""
     p = argparse.ArgumentParser(description="Train cloud seg on weighted dataset mix")
-    p.add_argument("--model", type=str, default="unet", choices=["unet", "segformer_b2", "cloud_adapter"])
+    p.add_argument(
+        "--model",
+        type=str,
+        default="unet",
+        choices=["unet", "segformer_b2", "cloudnet", "cloudnet_plus", "cloud_adapter"],
+    )
+    p.add_argument(
+        "--loss",
+        type=str,
+        default="auto",
+        choices=["auto", "dice_bce", "soft_jaccard", "fjl1"],
+        help="auto: Cloud-Net → soft Jaccard, Cloud-Net+ → FJL1, иначе Dice+BCE",
+    )
     p.add_argument("--device-plan", type=str, default="4060", choices=sorted(DEVICE_PLANS))
     p.add_argument(
         "--datasets",
         type=str,
-        default="hrc,sparcs",
-        help="Через запятую: hrc,sparcs,cloud38,gf1,s2,photos",
+        default="hrc,sparcs,cloud38,gf1,s2",
+        help="Через запятую; первый — val (hrc → test). Кейс: hrc,sparcs,cloud38,gf1,s2",
     )
     p.add_argument("--epochs", type=int, default=10)
     p.add_argument("--batch-size", type=int, default=0, help="0 = из device-plan")
@@ -254,6 +270,34 @@ def parse_dataset_weights(raw: str) -> dict[str, float] | None:
     return out or None
 
 
+def resolve_loss(name: str, model: str, jaccard_weight: float) -> tuple[str, nn.Module]:
+    """Имя loss → модуль. ``auto`` зависит от модели.
+
+    Args:
+        name: ``auto`` | ``dice_bce`` | ``soft_jaccard`` | ``fjl1``.
+        model: Короткое имя модели.
+        jaccard_weight: Добавка soft Jaccard к Dice+BCE.
+
+    Returns:
+        (фактическое имя, criterion).
+    """
+    key = name
+    if key == "auto":
+        if model == "cloudnet":
+            key = "soft_jaccard"
+        elif model == "cloudnet_plus":
+            key = "fjl1"
+        else:
+            key = "dice_bce"
+    if key == "dice_bce":
+        return key, DiceBCELoss(jaccard_weight=jaccard_weight)
+    if key == "soft_jaccard":
+        return key, SoftJaccardLoss()
+    if key == "fjl1":
+        return key, FilteredJaccardLoss()
+    raise ValueError(f"Неизвестный loss {name!r}")
+
+
 def main() -> None:
     """Точка входа train-mix."""
     args = parse_args()
@@ -274,20 +318,28 @@ def main() -> None:
     if args.model == "segformer_b2" and batch_size > 4 and args.device_plan == "4060":
         batch_size = 4
         print("segformer_b2 на 4060: batch_size → 4", flush=True)
+    if args.model in {"cloudnet", "cloudnet_plus"} and batch_size > 4 and args.device_plan == "4060":
+        batch_size = 4
+        print(f"{args.model} на 4060: batch_size → 4 (пик ~5.6 GB на 384²)", flush=True)
 
     set_global_seed(args.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     project_root = resolve_project_root()
     print(f"device={device} plan={args.device_plan} model={args.model}", flush=True)
     print(f"project_root={project_root}", flush=True)
-    for _probe in ("hrc", "sparcs", "cloud38"):
-        print(f"  data[{_probe}]={resolve_data_root(_probe, project_root)}", flush=True)
 
     names = [x.strip() for x in args.datasets.split(",") if x.strip()]
     max_items = None if args.max_items <= 0 else args.max_items
     epoch_size = None if args.epoch_size <= 0 else args.epoch_size
     color_match = args.color_match_method if args.color_match_photos else None
     weight_overrides = parse_dataset_weights(args.dataset_weights)
+    effective_weights = {
+        name: float((weight_overrides or {}).get(name, DEFAULT_WEIGHTS.get(name, 1.0)))
+        for name in names
+    }
+    print(f"mix weights: {effective_weights}", flush=True)
+    for _probe in names:
+        print(f"  data[{_probe}]={resolve_data_root(_probe, project_root)}", flush=True)
     if color_match:
         print(
             f"color-match → Photos: method={color_match} "
@@ -309,7 +361,7 @@ def main() -> None:
         project_root=project_root,
         epoch_size=epoch_size,
         color_match=color_match,
-        weights=weight_overrides,
+        weights=effective_weights,
     )
     # Val: holdout первого датасета (для hrc — split=test) без аугов.
     val_name = names[0]
@@ -362,9 +414,16 @@ def main() -> None:
     )
 
     weights = None if args.encoder_weights.lower() in {"none", "", "null"} else args.encoder_weights
+    if args.model in {"cloudnet", "cloudnet_plus"}:
+        weights = None
     model = build_model(args.model, encoder_weights=weights).to(device)
-    criterion = DiceBCELoss(jaccard_weight=args.jaccard_weight)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+    loss_name, criterion = resolve_loss(args.loss, args.model, args.jaccard_weight)
+    n_params = sum(p.numel() for p in model.parameters())
+    print(f"loss={loss_name} params={n_params / 1e6:.2f}M", flush=True)
+    if args.model in {"cloudnet", "cloudnet_plus"}:
+        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    else:
+        optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
     run_name = args.run_name or (
         f"{'smoke_' if args.smoke else ''}{args.model}_{'+'.join(names)}_seed{args.seed}"
@@ -382,14 +441,17 @@ def main() -> None:
         "image_size": image_size,
         "max_items": args.max_items,
         "seed": args.seed,
+        "loss": loss_name,
         "jaccard_weight": args.jaccard_weight,
         "encoder_weights": weights,
+        "params_m": round(n_params / 1e6, 2),
+        "init": "kaiming_rgb3" if args.model in {"cloudnet", "cloudnet_plus"} else "smp",
         "device": str(device),
         "smoke": args.smoke,
         "color_match_photos": bool(args.color_match_photos),
         "color_match_method": color_match,
         "cubesat_augs": bool(args.cubesat_augs),
-        "dataset_weights": weight_overrides,
+        "dataset_weights": effective_weights,
     }
     (out_dir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
     maybe_clearml("cloudness-detection", run_name, config)

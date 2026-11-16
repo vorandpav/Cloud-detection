@@ -315,14 +315,12 @@ def eda_sparcs(out_dir: Path, rng: random.Random) -> dict:
             continue
         with Image.open(mask_path) as mimg:
             mask_arr = np.asarray(mimg)
-        # SPARCS: cloud обычно класс 5 (иногда 1 в simplified); берём типичные
-        # значения cloud из палитры USGS: 0 shadow, 1 clear, 2 thin, 3 snow, 4 water, 5 cloud
-        # на практике в PNG встречаются 0..5
+        # USGS SPARCS: 5 = cloud; binary/simplified маски — {0,1}
         unique = np.unique(mask_arr)
         if set(unique.tolist()) <= {0, 1}:
             cloud = mask_arr >= 1
         else:
-            cloud = np.isin(mask_arr, [2, 5])  # thin + cloud
+            cloud = mask_arr == 5
         cloud_fracs.append(float(cloud.mean()))
         if samples_saved < 3:
             samples_saved += 1
@@ -335,7 +333,7 @@ def eda_sparcs(out_dir: Path, rng: random.Random) -> dict:
     if cloud_fracs:
         hist_cloud_frac(
             cloud_fracs,
-            f"SPARCS cloud(+thin) fraction (n={len(cloud_fracs)})",
+            f"SPARCS cloud fraction (n={len(cloud_fracs)})",
             out_dir / "cloud_fraction_hist.png",
         )
 
